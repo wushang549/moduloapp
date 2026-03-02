@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Modulo App</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main class="layout">
+    <section class="panel">
+      <h1>Inverso multiplicativo (mod n)</h1>
+      <p class="lead">Calcula paso a paso usando Euclides extendido.</p>
+      <form id="modForm" class="form">
+        <label for="numberInput">Numero</label>
+        <input id="numberInput" name="numberInput" type="text" inputmode="numeric" placeholder="Ej. 17" required>
+        <label for="moduloInput">Modulo</label>
+        <input id="moduloInput" name="moduloInput" type="text" inputmode="numeric" placeholder="Ej. 3120" required>
+        <button type="submit">Calcular</button>
+      </form>
+      <p id="error" class="error" aria-live="polite"></p>
+    </section>
+
+    <section id="results" class="results" aria-live="polite"></section>
+  </main>
+  <script src="script.js"></script>
+</body>
+</html>
