@@ -1,3 +1,9 @@
+const SourceKind = {
+  ORIG_A: "OrigA",
+  ORIG_N: "OrigN",
+  REM: "Rem",
+};
+
 function parseBigInt(value) {
   const raw = value.trim();
   if (!/^-?\d+$/.test(raw)) {
@@ -10,219 +16,311 @@ function absBigInt(value) {
   return value < 0n ? -value : value;
 }
 
-function mod(value, base) {
-  return ((value % base) + base) % base;
+function mulMod(x, y, modBase) {
+  const a = ((x % modBase) + modBase) % modBase;
+  const b = ((y % modBase) + modBase) % modBase;
+  return (a * b) % modBase;
 }
 
-function cleanZeroTerms(expr) {
-  for (const [key, value] of expr.entries()) {
-    if (value === 0n) {
-      expr.delete(key);
-    }
-  }
+function sameSource(x, y) {
+  return x.kind === y.kind && x.remIndex === y.remIndex;
 }
 
-function labelForIndex(index, steps, aNorm, nAbs) {
-  if (index === 0) {
-    return `a(${aNorm})`;
+function sourceValueToString(source, a, n, remValues) {
+  if (source.kind === SourceKind.ORIG_A) {
+    return a.toString();
   }
-  if (index === 1) {
-    return `n(${nAbs})`;
+  if (source.kind === SourceKind.ORIG_N) {
+    return n.toString();
   }
-  const remIndex = index - 2;
-  if (remIndex >= 0 && remIndex < steps.length) {
-    return `r${remIndex}(${steps[remIndex].r})`;
+  if (
+    source.kind === SourceKind.REM &&
+    source.remIndex >= 0 &&
+    source.remIndex < remValues.length
+  ) {
+    return remValues[source.remIndex].toString();
   }
-  return `x${index}`;
+  return "0";
 }
 
-function formatExpression(expr, steps, aNorm, nAbs) {
-  const entries = [...expr.entries()]
-    .filter(([, coeff]) => coeff !== 0n)
-    .sort((a, b) => a[0] - b[0]);
-
-  if (entries.length === 0) {
+function formatExpressionGeneric(terms, bodyFn) {
+  if (!terms.length) {
     return "0";
   }
 
-  const parts = [];
-  entries.forEach(([index, coeff], idx) => {
-    const sign = coeff < 0n ? "-" : "+";
-    const magnitude = absBigInt(coeff);
-    const label = labelForIndex(index, steps, aNorm, nAbs);
-    const body = magnitude === 1n ? label : `${magnitude}*${label}`;
+  let out = "";
+  let first = true;
 
-    if (idx === 0) {
-      parts.push(coeff < 0n ? `-${body}` : body);
-    } else {
-      parts.push(`${sign} ${body}`);
-    }
-  });
-
-  return parts.join(" ");
-}
-
-function calculateInverse(numberValue, moduloValue) {
-  const aInput = parseBigInt(numberValue);
-  const nInput = parseBigInt(moduloValue);
-
-  if (nInput === 0n) {
-    throw new Error("El modulo no puede ser 0.");
-  }
-
-  const nAbs = absBigInt(nInput);
-  if (nAbs <= 1n) {
-    throw new Error("Usa un modulo con valor absoluto mayor a 1.");
-  }
-
-  const aNorm = mod(aInput, nAbs);
-  const steps = [];
-
-  let A = aNorm;
-  let B = nAbs;
-  while (B !== 0n) {
-    const q = A / B;
-    const r = A - q * B;
-    steps.push({ A, B, q, r });
-    A = B;
-    B = r;
-  }
-
-  const gcd = A;
-  const despeje = steps
-    .filter((step) => step.r !== 0n)
-    .map((step, idx) => `r${idx} = ${step.A} - ${step.B}*${step.q}`);
-
-  if (gcd !== 1n) {
-    return {
-      hasInverse: false,
-      aInput,
-      nInput,
-      aNorm,
-      nAbs,
-      gcd,
-      steps,
-      despeje,
-      sustitucion: [],
-    };
-  }
-
-  const m = steps.length;
-  const expr = new Map([[m, 1n]]);
-  const sustitucion = [];
-
-  if (m >= 2) {
-    sustitucion.push(`1 = r${m - 2} (${steps[m - 2].r})`);
-  } else {
-    sustitucion.push("1 = a");
-  }
-
-  for (let k = m - 2; k >= 0; k -= 1) {
-    const target = k + 2;
-    const coeff = expr.get(target);
-    if (coeff === undefined || coeff === 0n) {
+  for (const t of terms) {
+    if (t.coeff === 0n) {
       continue;
     }
 
-    expr.delete(target);
-    expr.set(k, (expr.get(k) || 0n) + coeff);
-    expr.set(k + 1, (expr.get(k + 1) || 0n) - coeff * steps[k].q);
-    cleanZeroTerms(expr);
+    const absCoeff = absBigInt(t.coeff);
+    const body = bodyFn(t, absCoeff);
 
-    sustitucion.push(`Sustituye r${k}: r${k} = ${steps[k].A} - ${steps[k].B}*${steps[k].q}`);
-    sustitucion.push(`1 = ${formatExpression(expr, steps, aNorm, nAbs)}`);
+    if (first) {
+      if (t.coeff < 0n) {
+        out += "-";
+      }
+      out += body;
+      first = false;
+    } else {
+      out += t.coeff < 0n ? " - " : " + ";
+      out += body;
+    }
   }
 
-  const s = expr.get(0) || 0n;
-  const t = expr.get(1) || 0n;
-  const inverse = mod(s, nAbs);
-  const verification = mod(aNorm * inverse, nAbs);
-
-  return {
-    hasInverse: true,
-    aInput,
-    nInput,
-    aNorm,
-    nAbs,
-    gcd,
-    steps,
-    despeje,
-    sustitucion,
-    s,
-    t,
-    inverse,
-    verification,
-  };
+  return out === "" ? "0" : out;
 }
 
-function renderList(title, items) {
-  const block = document.createElement("article");
-  block.className = "card";
-  const heading = document.createElement("h2");
-  heading.textContent = title;
-  block.appendChild(heading);
-
-  if (!items.length) {
-    const p = document.createElement("p");
-    p.textContent = "Sin pasos para mostrar.";
-    block.appendChild(p);
-    return block;
-  }
-
-  const ol = document.createElement("ol");
-  items.forEach((item) => {
-    const li = document.createElement("li");
-    li.textContent = item;
-    ol.appendChild(li);
+function formatExpression(terms, a, n, remValues) {
+  return formatExpressionGeneric(terms, (t, absCoeff) => {
+    const value = sourceValueToString(t.source, a, n, remValues);
+    if (absCoeff === 1n) {
+      return value;
+    }
+    return `${value} x ${absCoeff}`;
   });
-  block.appendChild(ol);
-  return block;
 }
 
-function renderSummary(result) {
-  const card = document.createElement("article");
-  card.className = "card";
-  const title = document.createElement("h2");
-  title.textContent = "Resumen";
-  card.appendChild(title);
+function formatExpressionWithSubstitution(terms, substStep, a, n, remValues) {
+  return formatExpressionGeneric(terms, (t, absCoeff) => {
+    if (
+      t.source.kind === SourceKind.REM &&
+      t.source.remIndex === substStep.remIndex
+    ) {
+      const rhs = `(${substStep.A} - ${substStep.B} x ${substStep.q})`;
+      if (absCoeff === 1n) {
+        return rhs;
+      }
+      return `${rhs} x ${absCoeff}`;
+    }
 
+    const value = sourceValueToString(t.source, a, n, remValues);
+    if (absCoeff === 1n) {
+      return value;
+    }
+    return `${value} x ${absCoeff}`;
+  });
+}
+
+function combineTerms(inputTerms) {
+  const out = [];
+
+  for (const t of inputTerms) {
+    if (t.coeff === 0n) {
+      continue;
+    }
+
+    let found = false;
+    for (const u of out) {
+      if (sameSource(t.source, u.source)) {
+        u.coeff += t.coeff;
+        found = true;
+        break;
+      }
+    }
+
+    if (!found) {
+      out.push({ coeff: t.coeff, source: t.source });
+    }
+  }
+
+  return out.filter((t) => t.coeff !== 0n);
+}
+
+function pickRemainderToExpand(terms, remToStep) {
+  let best = -1;
+
+  for (const t of terms) {
+    if (t.source.kind !== SourceKind.REM || t.coeff === 0n) {
+      continue;
+    }
+    if (!remToStep.has(t.source.remIndex)) {
+      continue;
+    }
+    if (t.source.remIndex > best) {
+      best = t.source.remIndex;
+    }
+  }
+
+  return best;
+}
+
+function buildConsoleLines(numberValue, moduloValue) {
+  const a = parseBigInt(numberValue);
+  const n = parseBigInt(moduloValue);
   const lines = [];
-  lines.push(`Entrada: a = ${result.aInput}, n = ${result.nInput}`);
-  lines.push(`Canonico: a mod |n| = ${result.aNorm}, |n| = ${result.nAbs}`);
-  lines.push(`gcd(a, n) = ${result.gcd}`);
 
-  if (result.hasInverse) {
-    lines.push(`Bezout: 1 = ${result.aNorm}*(${result.s}) + ${result.nAbs}*(${result.t})`);
-    lines.push(`Inverso canonico: ${result.inverse}`);
-    lines.push(`Verificacion: (${result.aNorm}*${result.inverse}) mod ${result.nAbs} = ${result.verification}`);
-  } else {
-    lines.push("No existe inverso multiplicativo porque gcd(a, n) != 1.");
+  lines.push(`${a} x == 1 mod ${n}`);
+  lines.push("");
+  lines.push("1. Algoritmo de Euclides");
+
+  const steps = [];
+  const remValues = [];
+  const remToStep = new Map();
+
+  let sourceA = { kind: SourceKind.ORIG_A, remIndex: -1 };
+  const sourceN = { kind: SourceKind.ORIG_N, remIndex: -1 };
+  let sourceB = sourceN;
+  let remCounter = 0;
+
+  if (n !== 0n) {
+    let A = a;
+    let B = n;
+
+    while (B !== 0n) {
+      const q = A / B;
+      const r = A - q * B;
+      const st = {
+        A,
+        B,
+        q,
+        r,
+        sourceA,
+        sourceB,
+        remIndex: remCounter,
+      };
+      remCounter += 1;
+
+      steps.push(st);
+      remValues.push(r);
+      if (r !== 0n) {
+        remToStep.set(st.remIndex, steps.length - 1);
+      }
+
+      lines.push(`${st.A} = ${st.B} x ${st.q} + ${st.r}`);
+
+      if (r === 0n) {
+        break;
+      }
+
+      const sourceR = { kind: SourceKind.REM, remIndex: st.remIndex };
+      A = B;
+      B = r;
+      sourceA = sourceB;
+      sourceB = sourceR;
+    }
   }
 
-  const ul = document.createElement("ul");
-  lines.forEach((line) => {
-    const li = document.createElement("li");
-    li.textContent = line;
-    ul.appendChild(li);
-  });
-  card.appendChild(ul);
-  return card;
+  let gcdValue = 0n;
+  let gcdStepIndex = -1;
+
+  if (n === 0n) {
+    gcdValue = absBigInt(a);
+  } else if (steps.length > 0) {
+    const last = steps[steps.length - 1];
+    if (last.r === 0n) {
+      if (steps.length === 1) {
+        gcdValue = absBigInt(last.B);
+      } else {
+        gcdStepIndex = steps.length - 2;
+        gcdValue = absBigInt(steps[gcdStepIndex].r);
+      }
+    }
+  }
+
+  lines.push("Nota: gcd(a,n) es el ultimo residuo distinto de cero.");
+  lines.push(`gcd(a,n) = ${gcdValue}`);
+
+  if (gcdValue !== 1n || n === 0n) {
+    lines.push("No existe inverso multiplicativo en Z_n porque gcd(a,n) != 1");
+    return lines;
+  }
+
+  lines.push("gcd(a,n)=1");
+  lines.push("");
+
+  lines.push("2. Despejar residuos");
+  for (const st of steps) {
+    if (st.r === 0n) {
+      continue;
+    }
+    lines.push(`${st.r} = ${st.A} - ${st.B} x ${st.q}`);
+  }
+  lines.push("");
+
+  lines.push("3. Se hace sustitucion hacia atras");
+  if (gcdStepIndex < 0) {
+    lines.push(`1 = ${n}`);
+  }
+
+  let current = [];
+  if (gcdStepIndex >= 0) {
+    const gStep = steps[gcdStepIndex];
+    current.push({ coeff: 1n, source: gStep.sourceA });
+    current.push({ coeff: -gStep.q, source: gStep.sourceB });
+    current = combineTerms(current);
+    lines.push(`1 = ${formatExpression(current, a, n, remValues)}`);
+  }
+
+  while (true) {
+    const remToExpand = pickRemainderToExpand(current, remToStep);
+    if (remToExpand < 0) {
+      break;
+    }
+
+    const idx = remToStep.get(remToExpand);
+    const subst = steps[idx];
+    lines.push(
+      `1 = ${formatExpressionWithSubstitution(current, subst, a, n, remValues)}`
+    );
+
+    const next = [];
+    for (const t of current) {
+      if (t.source.kind === SourceKind.REM && t.source.remIndex === remToExpand) {
+        next.push({ coeff: t.coeff, source: subst.sourceA });
+        next.push({ coeff: -t.coeff * subst.q, source: subst.sourceB });
+      } else {
+        next.push(t);
+      }
+    }
+
+    current = combineTerms(next);
+    lines.push(`1 = ${formatExpression(current, a, n, remValues)}`);
+  }
+  lines.push("");
+
+  let s = 0n;
+  let t = 0n;
+  for (const term of current) {
+    if (term.source.kind === SourceKind.ORIG_A) {
+      s += term.coeff;
+    } else if (term.source.kind === SourceKind.ORIG_N) {
+      t += term.coeff;
+    }
+  }
+
+  const modBase = absBigInt(n);
+  const canon = ((s % modBase) + modBase) % modBase;
+  const normA = ((a % modBase) + modBase) % modBase;
+  const verification = mulMod(normA, canon, modBase);
+
+  lines.push("Teorema de Bezout");
+  lines.push(`1 = ${a} x ${s} + ${n} x ${t}`);
+  lines.push("");
+
+  lines.push("Metodo normal");
+  lines.push(`s = ${s}`);
+  lines.push("");
+
+  lines.push("Numero canonico");
+  lines.push(`((s mod n) + n) mod n = ${canon}`);
+  lines.push(`(${a} x ${canon}) mod ${n} = ${verification}`);
+  lines.push(`Entonces el inverso multiplicativo de a es s mod n = ${canon}`);
+
+  return lines;
 }
 
-function renderResults(result) {
+function renderConsole(lines) {
   const results = document.getElementById("results");
   results.innerHTML = "";
 
-  const euclidItems = result.steps.map(
-    (step) => `${step.A} = ${step.B}*${step.q} + ${step.r}`
-  );
-  results.appendChild(renderSummary(result));
-  results.appendChild(renderList("1) Algoritmo de Euclides", euclidItems));
-  results.appendChild(renderList("2) Despeje de residuos", result.despeje));
-
-  if (result.hasInverse) {
-    results.appendChild(renderList("3) Sustitucion hacia atras", result.sustitucion));
-  }
+  const pre = document.createElement("pre");
+  pre.className = "console";
+  pre.textContent = lines.join("\n");
+  results.appendChild(pre);
 }
 
 function setup() {
@@ -232,18 +330,20 @@ function setup() {
   form.addEventListener("submit", (event) => {
     event.preventDefault();
     error.textContent = "";
+    document.getElementById("results").innerHTML = "";
 
     const numberValue = document.getElementById("numberInput").value;
     const moduloValue = document.getElementById("moduloInput").value;
 
     try {
-      const result = calculateInverse(numberValue, moduloValue);
-      renderResults(result);
+      const lines = buildConsoleLines(numberValue, moduloValue);
+      renderConsole(lines);
     } catch (err) {
-      document.getElementById("results").innerHTML = "";
       error.textContent = err.message;
     }
   });
 }
 
-setup();
+if (typeof document !== "undefined") {
+  setup();
+}

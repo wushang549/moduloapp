@@ -99,6 +99,18 @@ button:hover {
   gap: 0.9rem;
 }
 
+.console {
+  margin: 0;
+  padding: 1rem 1.1rem;
+  white-space: pre-wrap;
+  background: #0f1726;
+  color: #e6edf7;
+  border: 1px solid #223047;
+  border-radius: 14px;
+  box-shadow: 0 14px 24px rgba(9, 25, 56, 0.1);
+  font: 500 0.94rem/1.45 "Consolas", "Courier New", monospace;
+}
+
 .card {
   padding: 1rem 1.1rem;
 }
