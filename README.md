@@ -6,12 +6,6 @@ Pagina web simple para calcular el inverso multiplicativo de `a mod n` con expli
 
 Abre `index.html` en el navegador.
 
-## Deploy en GitHub Pages
+## Pagina en linea
 
-Este repo ya incluye workflow en `.github/workflows/pages.yml`.
-
-Al subirlo a GitHub:
-
-1. Ve a `Settings > Pages`.
-2. En `Build and deployment`, selecciona `Source: GitHub Actions`.
-3. Haz push a `main` y el workflow publicara la pagina.
+La pagina esta aqui: https://wushang549.github.io/moduloapp/
